@@ -502,6 +502,7 @@ fn test_negative_take_as_pod_with_move_constructor() {
     run_test_expect_fail(cxx, hdr, rs, &["take_bob"], &["Bob"]);
 }
 
+#[ignore] // https://github.com/google/autocxx/issues/1252
 #[test]
 fn test_take_as_pod_with_is_relocatable() {
     let cxx = indoc! {"
@@ -4980,6 +4981,7 @@ fn test_union_ignored() {
     run_test("", hdr, rs, &["B"], &[]);
 }
 
+#[ignore] // https://github.com/google/autocxx/issues/1251
 #[test]
 fn test_double_underscores_ignored() {
     let hdr = indoc! {"
@@ -9963,6 +9965,24 @@ fn test_pass_superclass() {
 }
 
 #[test]
+fn test_issue_1238() {
+    let hdr = indoc! {"
+    class b;
+    class c;
+    class f {
+        b d();
+    };
+    class S2E {
+    public:
+        f e;
+        b &d(c *) const;
+    };
+    "};
+    let rs = quote! {};
+    run_test("", hdr, rs, &["S2E"], &[]);
+}
+
+#[test]
 fn test_issue486_multi_types() {
     let hdr = indoc! {"
         namespace a {
@@ -11837,6 +11857,116 @@ fn test_issue_1170() {
         } DeterministicRNG;"
     };
     run_test("", hdr, quote! {}, &["Arch"], &[]);
+}
+
+// https://github.com/google/autocxx/issues/774
+#[test]
+fn test_virtual_methods() {
+    let hdr = indoc! {"
+        #include <cstdint>
+        #include <memory>
+        class Base {
+        public:
+            Base() {}
+            virtual ~Base() {}
+
+            virtual int a() = 0;
+
+            virtual void b(int) = 0;
+            virtual void b(bool) = 0;
+
+            virtual int c() const = 0;
+            virtual int c() = 0;
+        };
+        class FullyDefined : public Base {
+        public:
+            int a() { return 0; }
+
+            void b(int) { }
+            void b(bool) { }
+
+            int c() const { return 1; }
+            int c() { return 2; }
+        };
+        class Partial1 : public Base {
+        public:
+            int a() { return 0; }
+
+            void b(bool) {}
+        };
+
+        class Partial2 : public Base {
+        public:
+            int a() { return 0; }
+
+            void b(int) { }
+            void b(bool) { }
+
+            int c() const { return 1; }
+        };
+
+        class Partial3 : public Base {
+        public:
+            int a() { return 0; }
+
+            void b(int) { }
+
+            int c() const { return 1; }
+            int c() { return 2; }
+        };
+
+        class Partial4 : public Base {
+        public:
+            int a() { return 0; }
+
+            void b(int) { }
+            void b(bool) = 0;
+
+            int c() const { return 1; }
+            int c() { return 2; }
+        };
+
+        // TODO: currently this class cannot be detected as virtual as there
+        // is no metadata captured to show that this destructor is virtual
+        // uncommenting this (as well as corresponding sections below) gives a 
+        // 'instantiation of abstract class' error.
+        // class Partial5 : public Base {
+        // public:
+        //     ~Partial5() = 0;
+
+        //     int a() { return 0; }
+
+        //     void b(int) { }
+        //     void b(bool) { }
+
+        //     int c() const { return 1; }
+        //     int c() { return 2; }
+        // };
+
+    "};
+    let rs = quote! {
+        static_assertions::assert_impl_all!(ffi::FullyDefined: moveit::CopyNew);
+        static_assertions::assert_not_impl_any!(ffi::Partial1: moveit::CopyNew);
+        static_assertions::assert_not_impl_any!(ffi::Partial2: moveit::CopyNew);
+        static_assertions::assert_not_impl_any!(ffi::Partial3: moveit::CopyNew);
+        static_assertions::assert_not_impl_any!(ffi::Partial4: moveit::CopyNew);
+        // static_assertions::assert_not_impl_any!(ffi::Partial5: moveit::CopyNew);
+        let _c1 = ffi::FullyDefined::new().within_unique_ptr();
+    };
+    run_test(
+        "",
+        hdr,
+        rs,
+        &[
+            "FullyDefined",
+            "Partial1",
+            "Partial2",
+            "Partial3",
+            "Partial4",
+            // "Partial5"
+        ],
+        &[],
+    );
 }
 
 #[test]
